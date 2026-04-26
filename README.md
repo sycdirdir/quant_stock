@@ -1,181 +1,151 @@
-# Claude Code Haha
+# 量化交易模拟平台
 
-基于 Claude Code 泄露源码修复的**本地可运行版本**，支持接入任意 Anthropic 兼容 API（如 MiniMax、OpenRouter 等）。
+面向 **期货 + A 股投资者**的量化交易回测平台，支持日线/周线/月线数据回测、均线/MACD/KDJ 策略回测、时间轴播放模拟。
 
-> 原始泄露源码无法直接运行。本仓库修复了启动链路中的多个阻塞问题，使完整的 Ink TUI 交互界面可以在本地工作。
+## 功能特性
 
-<p align="center">
-  <img src="docs/00runtime.png" alt="运行截图" width="800">
-</p>
+- **K 线图表**：ECharts 蜡烛图 + MA5/MA10/MA20 均线叠加
+- **均线交叉回测**：可视化配置策略条件，实时计算买卖信号
+- **风控模块**：止损（5%）、止盈（10%）、仓位管理
+- **回测指标**：收益率、夏普比率、最大回撤、胜率、盈亏比
+- **策略管理**：策略模板保存/加载，云端同步（需服务端）
+- **微信登录**：扫码认证（需微信开放平台资质）
 
-## 功能
+## 项目结构
 
-- 完整的 Ink TUI 交互界面（与官方 Claude Code 一致）
-- `--print` 无头模式（脚本/CI 场景）
-- 支持 MCP 服务器、插件、Skills
-- 支持自定义 API 端点和模型
-- 降级 Recovery CLI 模式
+```
+quant_stock/
+├── client/                 # Windows 客户端（Electron + React）
+│   ├── src/
+│   │   ├── main/         # Electron 主进程
+│   │   ├── preload/       # 预加载脚本
+│   │   ├── renderer/      # React 渲染进程
+│   │   │   ├── components/ # UI 组件
+│   │   │   ├── store/    # Zustand 状态管理
+│   │   │   └── styles/    # CSS 样式
+│   │   └── python/        # Python 回测引擎
+│   └── package.json
+│
+├── server/                # 后端服务（FastAPI）
+│   ├── app/
+│   │   ├── routers/       # API 路由（auth/stocks/data/cloud）
+│   │   ├── models/        # SQLAlchemy 模型
+│   │   ├── schemas/       # Pydantic 模型
+│   │   └── utils/         # JWT/JWT 工具
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── requirements.txt
+│
+├── 量化交易模拟平台-需求文档.md
+├── 量化交易模拟平台-系统设计文档.md
+└── CLAUDE.md
+```
 
 ---
 
-## 架构概览
+## 快速部署
 
-<table>
-  <tr>
-    <td align="center" width="25%"><img src="docs/01-overall-architecture.png" alt="整体架构"><br><b>整体架构</b></td>
-    <td align="center" width="25%"><img src="docs/02-request-lifecycle.png" alt="请求生命周期"><br><b>请求生命周期</b></td>
-    <td align="center" width="25%"><img src="docs/03-tool-system.png" alt="工具系统"><br><b>工具系统</b></td>
-    <td align="center" width="25%"><img src="docs/04-multi-agent.png" alt="多 Agent 架构"><br><b>多 Agent 架构</b></td>
-  </tr>
-  <tr>
-    <td align="center" width="25%"><img src="docs/05-terminal-ui.png" alt="终端 UI"><br><b>终端 UI</b></td>
-    <td align="center" width="25%"><img src="docs/06-permission-security.png" alt="权限与安全"><br><b>权限与安全</b></td>
-    <td align="center" width="25%"><img src="docs/07-services-layer.png" alt="服务层"><br><b>服务层</b></td>
-    <td align="center" width="25%"><img src="docs/08-state-data-flow.png" alt="状态与数据流"><br><b>状态与数据流</b></td>
-  </tr>
-</table>
+### 前置要求
+
+- Python 3.11+
+- Node.js 18+ / npm
+- Docker（用于服务端部署）
+- PostgreSQL 客户端（10.168.1.112，已导入 tushare 数据）
+
+---
+
+### 一、服务端部署（Docker）
+
+```bash
+cd server
+
+# 配置环境变量（编辑 .env 或直接修改 docker-compose.yml）
+# WECHAT_APPID / WECHAT_APPSECRET 留空可跳过微信登录
+
+docker-compose up -d
+```
+
+服务启动后访问 `http://localhost:8000/docs` 查看 API 文档。
+
+**手动启动（无 Docker）：**
+```bash
+cd server
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+### 二、Windows 客户端开发
+
+```bash
+cd client
+
+# 安装依赖
+npm install
+
+# 开发模式启动
+npm run dev
+
+# 打包 Windows 安装包
+npm run package
+```
+
+> 客户端连接 `http://localhost:8000`（开发时）
+> 打包后需修改主进程中的 API 地址指向实际服务器 IP
+
+---
+
+### 三、数据库连接
+
+服务端连接 PostgreSQL（10.168.1.112 tushare 库）：
+
+| 表名 | 说明 |
+|------|------|
+| `stock_basic` | 股票/期货基础信息（5493条） |
+| `daily` | 日线数据（2020-01-02 ~ 2026-04-24） |
+| `stock_weekly` | 周线数据 |
+| `stock_monthly` | 月线数据 |
+
+> 分钟线数据（1min/5min/30min/60min）待 H5 文件导入
+
+---
+
+## 环境变量
+
+### 服务端（server/.env）
+
+```env
+DATABASE_URL=postgresql+asyncpg://user_PZW4Kp:password_6n6yfp@10.168.1.112:5432/tushare
+JWT_SECRET=your_jwt_secret_key_here
+WECHAT_APPID=your_wechat_appid
+WECHAT_APPSECRET=your_wechat_appsecret
+```
+
+### 客户端（server 地址配置）
+
+客户端默认连接 `http://localhost:8000`，修改 `client/src/main/index.ts` 中的 API 地址。
+
+---
+
+## API 接口
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `GET /api/stocks` | GET | 股票列表（分页/搜索） |
+| `GET /api/data/download/{ts_code}` | GET | K线数据下载 |
+| `GET /api/data/updates` | GET | 增量更新列表 |
+| `POST /api/auth/wechat/login` | POST | 微信登录 |
+| `POST /api/cloud/strategies/sync` | POST | 策略云端同步 |
+
+完整 API 文档：`http://localhost:8000/docs`
 
 ---
 
 ## 快速开始
 
-### 1. 安装依赖
-
-需要 [Bun](https://bun.sh) >= 1.1 和 Node.js >= 18。
-
-```bash
-npm install
-```
-
-### 2. 配置环境变量
-
-复制示例文件并填入你的 API Key：
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env`：
-
-```env
-# API 认证（二选一）
-ANTHROPIC_API_KEY=sk-xxx          # 标准 API Key（x-api-key 头）
-ANTHROPIC_AUTH_TOKEN=sk-xxx       # Bearer Token（Authorization 头）
-
-# API 端点（可选，默认 Anthropic 官方）
-ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-
-# 模型配置
-ANTHROPIC_MODEL=MiniMax-M2.7-highspeed
-ANTHROPIC_DEFAULT_SONNET_MODEL=MiniMax-M2.7-highspeed
-ANTHROPIC_DEFAULT_HAIKU_MODEL=MiniMax-M2.7-highspeed
-ANTHROPIC_DEFAULT_OPUS_MODEL=MiniMax-M2.7-highspeed
-
-# 超时（毫秒）
-API_TIMEOUT_MS=3000000
-
-# 禁用遥测和非必要网络请求
-DISABLE_TELEMETRY=1
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-```
-
-### 3. 启动
-
-```bash
-# 交互 TUI 模式（完整界面）
-./bin/claude-haha
-
-# 无头模式（单次问答）
-./bin/claude-haha -p "your prompt here"
-
-# 管道输入
-echo "explain this code" | ./bin/claude-haha -p
-
-# 查看所有选项
-./bin/claude-haha --help
-```
-
----
-
-## 环境变量说明
-
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `ANTHROPIC_API_KEY` | 二选一 | API Key，通过 `x-api-key` 头发送 |
-| `ANTHROPIC_AUTH_TOKEN` | 二选一 | Auth Token，通过 `Authorization: Bearer` 头发送 |
-| `ANTHROPIC_BASE_URL` | 否 | 自定义 API 端点，默认 Anthropic 官方 |
-| `ANTHROPIC_MODEL` | 否 | 默认模型 |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | 否 | Sonnet 级别模型映射 |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | 否 | Haiku 级别模型映射 |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | 否 | Opus 级别模型映射 |
-| `API_TIMEOUT_MS` | 否 | API 请求超时，默认 600000 (10min) |
-| `DISABLE_TELEMETRY` | 否 | 设为 `1` 禁用遥测 |
-| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | 否 | 设为 `1` 禁用非必要网络请求 |
-
----
-
-## 降级模式
-
-如果完整 TUI 出现问题，可以使用简化版 readline 交互模式：
-
-```bash
-CLAUDE_CODE_FORCE_RECOVERY_CLI=1 ./bin/claude-haha
-```
-
----
-
-## 相对于原始泄露源码的修复
-
-泄露的源码无法直接运行，主要修复了以下问题：
-
-| 问题 | 根因 | 修复 |
-|------|------|------|
-| TUI 不启动 | 入口脚本把无参数启动路由到了 recovery CLI | 恢复走 `cli.tsx` 完整入口 |
-| 启动卡死 | `verify` skill 导入缺失的 `.md` 文件，Bun text loader 无限挂起 | 创建 stub `.md` 文件 |
-| `--print` 卡死 | `filePersistence/types.ts` 缺失 | 创建类型桩文件 |
-| `--print` 卡死 | `ultraplan/prompt.txt` 缺失 | 创建资源桩文件 |
-| **Enter 键无响应** | `modifiers-napi` native 包缺失，`isModifierPressed()` 抛异常导致 `handleEnter` 中断，`onSubmit` 永远不执行 | 加 try-catch 容错 |
-| setup 被跳过 | `preload.ts` 自动设置 `LOCAL_RECOVERY=1` 跳过全部初始化 | 移除默认设置 |
-
----
-
-## 项目结构
-
-```
-bin/claude-haha          # 入口脚本
-preload.ts               # Bun preload（设置 MACRO 全局变量）
-.env.example             # 环境变量模板
-src/
-├── entrypoints/cli.tsx  # CLI 主入口
-├── main.tsx             # TUI 主逻辑（Commander.js + React/Ink）
-├── localRecoveryCli.ts  # 降级 Recovery CLI
-├── setup.ts             # 启动初始化
-├── screens/REPL.tsx     # 交互 REPL 界面
-├── ink/                 # Ink 终端渲染引擎
-├── components/          # UI 组件
-├── tools/               # Agent 工具（Bash, Edit, Grep 等）
-├── commands/            # 斜杠命令（/commit, /review 等）
-├── skills/              # Skill 系统
-├── services/            # 服务层（API, MCP, OAuth 等）
-├── hooks/               # React hooks
-└── utils/               # 工具函数
-```
-
----
-
-## 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| 运行时 | [Bun](https://bun.sh) |
-| 语言 | TypeScript |
-| 终端 UI | React + [Ink](https://github.com/vadimdemedes/ink) |
-| CLI 解析 | Commander.js |
-| API | Anthropic SDK |
-| 协议 | MCP, LSP |
-
----
-
-## Disclaimer
-
-本仓库基于 2026-03-31 从 Anthropic npm registry 泄露的 Claude Code 源码。所有原始源码版权归 [Anthropic](https://www.anthropic.com) 所有。仅供学习和研究用途。
+1. 启动服务端：`cd server && docker-compose up -d`
+2. 安装客户端依赖：`cd client && npm install`
+3. 启动客户端：`cd client && npm run dev`
+4. 登录（开发模式可跳过，直接进入主界面）
+5. 选择股票 → 配置策略 → 运行回测
