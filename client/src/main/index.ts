@@ -8,6 +8,14 @@ log.info('应用启动...')
 
 let mainWindow: BrowserWindow | null = null
 
+// WebSocket 连接管理
+let wsConnection: WebSocket | null = null
+let wsReconnectTimer: NodeJS.Timeout | null = null
+let wsReconnectAttempts = 0
+const WS_URL = 'ws://localhost:8000/ws/stream'
+const WS_MAX_RECONNECT_DELAY = 30000  // 最大重连延迟 30秒
+const WS_BASE_RECONNECT_DELAY = 1000  // 基础重连延迟 1秒
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -302,3 +310,128 @@ ipcMain.handle('auth:wechat_login', async (_event, code: string) => {
 })
 
 log.info('IPC 处理器注册完成')
+
+// ============================================================
+// WebSocket 实时行情管理
+// ============================================================
+
+function connectWebSocket() {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    return
+  }
+
+  try {
+    wsConnection = new WebSocket(WS_URL)
+
+    wsConnection.onopen = () => {
+      log.info('WebSocket 连接已建立')
+      // 清除重连定时器
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer)
+        wsReconnectTimer = null
+      }
+      // 重置重连计数
+      wsReconnectAttempts = 0
+      // 通知渲染进程
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('stream:connected', { status: 'connected' })
+      }
+    }
+
+    wsConnection.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data)
+        // 转发到渲染进程
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('stream:message', message)
+        }
+      } catch (e) {
+        log.error('WebSocket 消息解析失败:', e)
+      }
+    }
+
+    wsConnection.onerror = (error) => {
+      log.error('WebSocket 错误:', error)
+    }
+
+    wsConnection.onclose = () => {
+      log.info('WebSocket 连接已关闭')
+      wsConnection = null
+      // 通知渲染进程
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('stream:disconnected', { status: 'disconnected' })
+      }
+      // 指数退避重连 (1s, 2s, 4s, 8s, 16s, 最大 30s)
+      if (!wsReconnectTimer) {
+        wsReconnectAttempts++
+        const delay = Math.min(WS_BASE_RECONNECT_DELAY * Math.pow(2, wsReconnectAttempts - 1), WS_MAX_RECONNECT_DELAY)
+        log.info(`WebSocket ${delay}ms 后重连 (第 ${wsReconnectAttempts} 次)`)
+        wsReconnectTimer = setTimeout(() => {
+          wsReconnectTimer = null
+          connectWebSocket()
+        }, delay)
+      }
+    }
+
+  } catch (error: any) {
+    log.error('WebSocket 连接失败:', error.message)
+  }
+}
+
+function disconnectWebSocket() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer)
+    wsReconnectTimer = null
+  }
+  if (wsConnection) {
+    wsConnection.close()
+    wsConnection = null
+  }
+}
+
+// WebSocket IPC 处理器
+ipcMain.handle('stream:connect', async () => {
+  connectWebSocket()
+  return { success: true }
+})
+
+ipcMain.handle('stream:disconnect', async () => {
+  disconnectWebSocket()
+  return { success: true }
+})
+
+ipcMain.handle('stream:subscribe', async (_event, tsCodes: string[]) => {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'subscribe',
+      ts_codes: tsCodes
+    }))
+    return { success: true }
+  }
+  return { success: false, error: 'WebSocket 未连接' }
+})
+
+ipcMain.handle('stream:unsubscribe', async (_event, tsCodes: string[]) => {
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'unsubscribe',
+      ts_codes: tsCodes
+    }))
+    return { success: true }
+  }
+  return { success: false, error: 'WebSocket 未连接' }
+})
+
+ipcMain.handle('stream:get_status', async () => {
+  return {
+    success: true,
+    data: {
+      connected: wsConnection !== null && wsConnection.readyState === WebSocket.OPEN
+    }
+  }
+})
+
+// 应用退出时关闭 WebSocket
+app.on('before-quit', () => {
+  disconnectWebSocket()
+})

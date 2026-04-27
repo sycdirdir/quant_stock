@@ -10,6 +10,7 @@
 - **回测指标**：收益率、夏普比率、最大回撤、胜率、盈亏比
 - **策略管理**：策略模板保存/加载，云端同步（需服务端）
 - **微信登录**：扫码认证（需微信开放平台资质）
+- **实时行情**：WebSocket 流式推送，支持增量更新，断线自动重连
 
 ## 项目结构
 
@@ -28,7 +29,7 @@ quant_stock/
 │
 ├── server/                # 后端服务（FastAPI）
 │   ├── app/
-│   │   ├── routers/       # API 路由（auth/stocks/data/cloud）
+│   │   ├── routers/       # API 路由（auth/stocks/data/cloud/stream）
 │   │   ├── models/        # SQLAlchemy 模型
 │   │   ├── schemas/       # Pydantic 模型
 │   │   └── utils/         # JWT/JWT 工具
@@ -130,13 +131,36 @@ WECHAT_APPSECRET=your_wechat_appsecret
 
 ## API 接口
 
+### REST API
+
 | 接口 | 方法 | 说明 |
 |------|------|------|
 | `GET /api/stocks` | GET | 股票列表（分页/搜索） |
 | `GET /api/data/download/{ts_code}` | GET | K线数据下载 |
 | `GET /api/data/updates` | GET | 增量更新列表 |
 | `POST /api/auth/wechat/login` | POST | 微信登录 |
-| `POST /api/cloud/strategies/sync` | POST | 策略云端同步 |
+| `POST /api/cloud/strategies/sync` | POST | 策略云端同步（全量/增量） |
+| `GET /api/cloud/strategies` | GET | 获取云端策略列表 |
+| `GET /api/cloud/strategies/{id}` | GET | 获取策略详情 |
+| `DELETE /api/cloud/strategies/{id}` | DELETE | 删除云端策略 |
+| `GET /api/cloud/strategies/{id}/versions` | GET | 获取策略版本历史 |
+| `GET /api/cloud/templates` | GET | 获取策略模板列表 |
+| `POST /api/cloud/strategies/from-template/{id}` | POST | 从模板创建策略 |
+| `GET /api/qlib/factors/{ts_code}` | GET | 获取 Alpha158 因子 |
+| `GET /api/qlib/backtest/signals` | GET | 获取 ML 交易信号 |
+
+### WebSocket 流服务
+
+| 接口 | 说明 |
+|------|------|
+| `WebSocket /ws/stream` | 实时行情流（支持增量更新） |
+| `GET /api/stream/status` | 流服务状态 |
+
+**WebSocket 消息类型**:
+- `quote` - 完整行情数据
+- `quote_delta` - 增量行情更新（仅变化字段）
+- `kline` - K线更新
+- `signal` - 交易信号
 
 完整 API 文档：`http://localhost:8000/docs`
 
